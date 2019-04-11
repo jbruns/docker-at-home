@@ -1,0 +1,1 @@
+sharename -fstype=cifs,credentials=/root/.cifscred,iocharset=utf8,uid=username,gid=groupname,file_mode=0640,dir_mode=0770,vers=3.0 ://server.domain.tld/sharename

@@ -1,0 +1,223 @@
+version: '3'
+services:
+  # management
+  backup-daily:
+    container_name: backup-daily
+    image: futurice/docker-volume-backup:2.0.1
+    restart: unless-stopped
+    environment:
+      BACKUP_CRON_EXPRESSION: "0 5 * * *"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /mnt/afs/backups/docker/daily:/archive
+      - mariadb_tmp:/backup/mariadb:ro
+      - nextcloud_root:/backup/nextcloud_root:ro
+      - nextcloud_config:/backup/nextcloud_config:ro
+      - nextcloud_customapps:/backup/nextcloud_customapps:ro
+      - nextcloud_data:/backup/nextcloud_data:ro
+
+  backup-weekly:
+    container_name: backup-weekly
+    image: futurice/docker-volume-backup:2.0.1
+    restart: unless-stopped
+    environment:
+      BACKUP_CRON_EXPRESSION: "0 2 * * MON"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /mnt/afs/backups/docker/weekly:/archive
+      - plex_data:/backup/plex_data:ro
+      - grafana_data:/backup/grafana_data:ro
+      - grafana_config:/backup/grafana_config:ro
+      - influxdb_tmp:/backup/influxdb:ro
+      - portainer_data:/backup/portainer_data:ro
+      - unifi_data:/backup/unifi_data:ro
+      - tautulli_data:/backup/tautulli_data:ro
+      - organizr_data:/backup/organizr_data:ro
+
+  bastion:
+    container_name: bastion
+    image: neochrome/bastion
+    restart: unless-stopped
+    ports:
+      - "2222:22"
+    volumes:
+      - bastion_data:/etc/ssh
+      - bastion_keys:/bastion
+
+  portainer:
+    container_name: portainer
+    image: portainer/portainer
+    restart: unless-stopped
+    ports:
+      - 9001:9000
+    volumes:
+      - portainer_data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+  
+  unifi:
+    container_name: unifi
+    image: jacobalberty/unifi:stable
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - TZ=America/Los_Angeles
+      - RUNAS_UID0=false
+      - UNIFI_UID=1201
+      - UNIFI_GID=1201
+    volumes:
+      - unifi_data:/unifi
+  
+  # data tier
+  mariadb:
+    container_name: mariadb
+    image: mariadb:10.3-bionic
+    restart: unless-stopped
+    ports: 
+      - 3306:3306
+    environment:
+      - MYSQL_ROOT_PASSWORD=Default123
+    volumes:
+      - mariadb_data:/var/lib/mysql
+      - mariadb_config:/etc/mysql
+      - mariadb_tmp:/tmp/mariadb
+      - /etc/docker_shared/mariadb_backup.sh:/mariadb_backup.sh:ro
+    labels:
+      - docker-volume-backup.exec-pre-backup=/mariadb_backup.sh ${MARIADB_ROOT}
+      - docker-volume-backup.exec-post-backup=rm -rfv /tmp/mariadb
+
+  influxdb:
+    container_name: influxdb
+    image: influxdb
+    restart: unless-stopped
+    ports:
+      - 8086:8086
+    volumes:
+      - influxdb_data:/var/lib/influxdb
+      - influxdb_config:/etc/influxdb
+      - influxdb_tmp:/tmp/influxdb
+    labels:
+      - docker-volume-backup.exec-pre-backup=influxd backup -portable /tmp/influxdb
+      - docker-volume-backup.exec-post-backup=rm -rfv /tmp/influxdb
+  
+  # caching tier
+  redis:
+    container_name: redis
+    image: redis
+    restart: unless-stopped
+    ports:
+      - 6379:6379
+    volumes:
+      - redis_data:/data
+  
+  # web tier
+  plex:
+    container_name: plex
+    image: plexinc/pms-docker:public
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - TZ=America/Los_Angeles
+      - PLEX_UID=1203
+      - PLEX_GID=1203
+    volumes:
+      - plex_data:/config
+      - plex_transcode:/transcode
+      - /mnt/afs/sharename:/data/sharename:ro
+  
+  nextcloud:
+    container_name: nextcloud
+    image: nextcloud
+    restart: unless-stopped
+    depends_on:
+      - mariadb
+      - redis
+    ports:
+      - 8081:80
+    volumes:
+      - nextcloud_root:/var/www/html
+      - nextcloud_data:/var/www/html/data
+      - nextcloud_customapps:/var/www/html/custom_apps
+      - nextcloud_config:/var/www/html/config
+  
+  tautulli:
+    container_name: tautulli
+    image: tautulli/tautulli
+    restart: unless-stopped
+    depends_on:
+      - plex
+    ports:
+      - 8181:8181
+    environment:
+      - TZ=America/Los_Angeles
+      - PUID=1203
+      - PGID=1203
+    volumes:
+      - tautulli_data:/config
+      - plex_data:/plex_logs:ro
+  
+  grafana:
+    container_name: grafana
+    image: grafana/grafana
+    restart: unless-stopped
+    depends_on:
+      - influxdb
+    ports:
+      - 3000:3000
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - grafana_config:/etc/grafana
+    labels:
+      - "docker-volume-backup.stop-during-backup=true"
+
+  organizr:
+    container_name: organizr
+    image: linuxserver/organizr
+    restart: unless-stopped
+    ports:
+      - 8983:80
+    environment:
+      - PUID=1202
+      - PGID=1202
+      - TZ=America/Los_Angeles
+    volumes:
+      - organizr_data:/config
+
+  # edge tier
+  caddy:
+    container_name: caddy
+    image: abiosoft/caddy:no-stats
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - CADDYPATH=/etc/caddycerts
+      - ACME_AGREE=true
+    volumes:
+      - caddy_data:/etc/caddycerts
+      - caddy_root:/root/.caddy
+      - caddy_srv:/srv
+      - /etc/docker_shared/Caddyfile:/etc/Caddyfile:ro
+  
+# Volume definitions
+volumes:
+  portainer_data:
+  unifi_data:
+  mariadb_data:
+  mariadb_config:
+  mariadb_tmp:
+  influxdb_data:
+  influxdb_config:
+  influxdb_tmp:
+  redis_data:
+  plex_data:
+  plex_transcode:
+  nextcloud_root:
+  nextcloud_data:
+  nextcloud_customapps:
+  nextcloud_config:
+  tautulli_data:
+  grafana_data:
+  grafana_config:
+  organizr_data:
+  caddy_data:
+  caddy_root:
+  caddy_srv:

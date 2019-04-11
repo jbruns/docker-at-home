@@ -1,0 +1,15 @@
+[Unit]
+Description=Mount Google Team Drive Cache
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/rclone mount --read-only --allow-other cloud_cache: /mnt/cloud/drivename/
+ExecStop=/bin/fusermount -uz /mnt/cloud/drivename
+Restart=on-abort
+User=1203
+Group=1203
+
+[Install]
+WantedBy=multi-user.target
